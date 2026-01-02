@@ -1,0 +1,10 @@
+version: '3.8'
+services:
+  proxy-bot:
+    build: .
+    container_name: proxy-checker-app
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - TZ=Asia/Ho_Chi_Minh
