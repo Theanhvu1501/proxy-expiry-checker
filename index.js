@@ -61,6 +61,7 @@ async function checkProxyStatus() {
         // Thêm vào nội dung tin nhắn Telegram
         telegramMessage += `📌 <b>Note:</b> ${proxy.note || "Trống"}\n`;
         telegramMessage += `🔹 ID: <code>${proxy.id}</code>\n`;
+        telegramMessage += `🔹 Socks: <code>${proxy.public_ip}:${proxy.socks_port}</code>\n`;
         telegramMessage += `🔹 Gói: ${proxy.package_name}\n`;
         telegramMessage += `🔹 Còn lại: <b>${hoursLeft} giờ</b>\n`;
         telegramMessage += `---------------------------\n`;
