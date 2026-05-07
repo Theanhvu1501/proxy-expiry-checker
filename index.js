@@ -1,22 +1,12 @@
-require("dotenv").config();
 const axios = require("axios");
 const cron = require("node-cron");
-
-const M2PROXY_TOKEN = process.env.M2PROXY_TOKEN;
-const ZINGPROXY_TOKEN = process.env.ZINGPROXY_TOKEN;
-
-const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+const fs = require("fs"); // Thêm thư viện đọc file của Node.js
 
 // Hàm gửi tin nhắn Telegram
-async function sendTelegram(message) {
-  const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
+async function sendTelegram(botToken, chatId, message) {
+  const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
   try {
-    await axios.post(url, {
-      chat_id: TELEGRAM_CHAT_ID,
-      text: message,
-      parse_mode: "HTML",
-    });
+    await axios.post(url, { chat_id: chatId, text: message, parse_mode: "HTML" });
   } catch (error) {
     console.error("❌ Lỗi gửi Telegram:", error.response?.data || error.message);
   }
@@ -25,20 +15,19 @@ async function sendTelegram(message) {
 // ==========================================
 // HÀM KIỂM TRA M2PROXY
 // ==========================================
-async function checkM2Proxy() {
+async function checkM2Proxy(config) {
+  if (!config.m2proxy_token) return;
+
   try {
-    const API_URL = `https://api.m2proxy.com/user/data/getlistproxy?token=${M2PROXY_TOKEN}`;
+    const API_URL = `https://api.m2proxy.com/user/data/getlistproxy?token=${config.m2proxy_token}`;
     const response = await axios.get(API_URL);
 
-    if (response.data.Status.toLowerCase() !== "success") {
-      console.error("❌ Lỗi API M2Proxy:", response.data.Message);
-      return;
-    }
+    if (response.data.Status.toLowerCase() !== "success") return;
 
     const proxyList = response.data.Data;
     const now = new Date();
     let warnings = [];
-    let telegramMessage = `⚠️ <b>[M2PROXY] SẮP HẾT HẠN</b>\n\n`;
+    let telegramMessage = `⚠️ <b>[M2PROXY] SẮP HẾT HẠN </b>\n\n`;
 
     proxyList.forEach((proxy) => {
       const expiryDate = new Date(proxy.expired_date);
@@ -47,12 +36,7 @@ async function checkM2Proxy() {
 
       if (diffDays > 0 && diffDays <= 2) {
         const hoursLeft = (diffDays * 24).toFixed(1);
-
-        warnings.push({
-          id: proxy.id,
-          note: proxy.note || "Trống",
-          timeLeft: `${hoursLeft} giờ`,
-        });
+        warnings.push({ id: proxy.id, note: proxy.note || "Trống", timeLeft: `${hoursLeft} h` });
 
         telegramMessage += `📌 <b>Note:</b> ${proxy.note || "Trống"}\n`;
         telegramMessage += `🔹 ID: <code>${proxy.id}</code>\n`;
@@ -63,56 +47,45 @@ async function checkM2Proxy() {
     });
 
     if (warnings.length > 0) {
-      console.warn("⚠️ [M2Proxy] Tìm thấy proxy sắp hết hạn!");
+      console.log(`⚠️ [${config.projectName} - M2Proxy] Có proxy sắp hết hạn!`);
       console.table(warnings);
-      await sendTelegram(telegramMessage);
-    } else {
-      console.log("✅ [M2Proxy] Không có proxy nào sắp hết hạn.");
+      await sendTelegram(config.telegram_token, config.telegram_chat_id, telegramMessage);
     }
   } catch (error) {
-    console.error("❌ Lỗi hệ thống M2Proxy:", error.message);
+    console.error(`❌ Lỗi M2Proxy (${config.projectName}):`, error.message);
   }
 }
 
 // ==========================================
 // HÀM KIỂM TRA ZINGPROXY
 // ==========================================
-async function checkZingProxy() {
+async function checkZingProxy(config) {
+  if (!config.zingproxy_token) return;
+
   try {
     const API_URL = 'https://api.zingproxy.com/proxy/datacenter-private-ipv4/running';
     const response = await axios.get(API_URL, {
-      headers: {
-        'Authorization': `Bearer ${ZINGPROXY_TOKEN}`
-      }
+      headers: { 'Authorization': `Bearer ${config.zingproxy_token}` }
     });
 
-    if (response.data.status !== "success") {
-      console.error("❌ Lỗi API ZingProxy:", response.data.message);
-      return;
-    }
+    if (response.data.status !== "success") return;
 
     const proxyList = response.data.proxies;
     const now = new Date();
     let warnings = [];
-    let telegramMessage = `⚠️ <b>[ZINGPROXY] SẮP HẾT HẠN</b>\n\n`;
+    let telegramMessage = `⚠️ <b>[ZINGPROXY] SẮP HẾT HẠN </b>\n\n`;
 
     proxyList.forEach((proxy) => {
-      const expiryDate = new Date(proxy.dateEnd); // ZingProxy dùng trường dateEnd
+      const expiryDate = new Date(proxy.dateEnd);
       const diffTime = expiryDate - now;
       const diffDays = diffTime / (1000 * 60 * 60 * 24);
 
       if (diffDays > 0 && diffDays <= 2) {
         const hoursLeft = (diffDays * 24).toFixed(1);
-
-        warnings.push({
-          id: proxy.resourceId,
-          note: proxy.note || "Trống",
-          timeLeft: `${hoursLeft} giờ`,
-        });
+        warnings.push({ id: proxy.resourceId, note: proxy.note || "Trống", timeLeft: `${hoursLeft} h` });
 
         telegramMessage += `📌 <b>Note:</b> ${proxy.note || "Trống"}\n`;
         telegramMessage += `🔹 ID: <code>${proxy.resourceId}</code>\n`;
-        // Hiển thị portSocks5 (Nếu bạn dùng portHttp thì đổi thành proxy.portHttp)
         telegramMessage += `🔹 Proxy: <code>${proxy.ip}:${proxy.portSocks5}</code>\n`; 
         telegramMessage += `🔹 Còn lại: <b>${hoursLeft} giờ</b>\n`;
         telegramMessage += `---------------------------\n`;
@@ -120,42 +93,46 @@ async function checkZingProxy() {
     });
 
     if (warnings.length > 0) {
-      console.warn("⚠️ [ZingProxy] Tìm thấy proxy sắp hết hạn!");
+      console.log(`⚠️ [${config.projectName} - ZingProxy] Có proxy sắp hết hạn!`);
       console.table(warnings);
-      await sendTelegram(telegramMessage);
-    } else {
-      console.log("✅ [ZingProxy] Không có proxy nào sắp hết hạn.");
+      await sendTelegram(config.telegram_token, config.telegram_chat_id, telegramMessage);
     }
   } catch (error) {
-    console.error("❌ Lỗi hệ thống ZingProxy:", error.message);
+    console.error(`❌ Lỗi ZingProxy (${config.projectName}):`, error.message);
   }
 }
 
 // ==========================================
-// HÀM CHẠY TỔNG HỢP
+// HÀM CHẠY TỔNG HỢP CHO TẤT CẢ DỰ ÁN
 // ==========================================
 async function runAllChecks() {
-  console.log(`\n[${new Date().toLocaleString()}] --- ĐANG KIỂM TRA TẤT CẢ PROXY ---`);
-  await checkM2Proxy();
-  await checkZingProxy();
-  console.log(`[${new Date().toLocaleString()}] --- HOÀN TẤT KIỂM TRA ---`);
+  console.log(`\n[${new Date().toLocaleString()}] --- BẮT ĐẦU KIỂM TRA ---`);
+  
+  let configs = [];
+  try {
+    // ĐỌC FILE JSON TRỰC TIẾP MỖI LẦN CHẠY
+    const rawData = fs.readFileSync("./config.json", "utf-8");
+    configs = JSON.parse(rawData);
+  } catch (error) {
+    console.error("❌ Lỗi khi đọc file config.json! Hãy kiểm tra lại cú pháp JSON.");
+    return; // Dừng lại nếu file json bị lỗi cú pháp
+  }
+
+  // Vòng lặp chạy qua từng cấu hình
+  for (const config of configs) {
+    console.log(`\n👉 Đang kiểm tra: ${config.projectName}`);
+    await checkM2Proxy(config);
+    await checkZingProxy(config);
+  }
+
+  console.log(`\n[${new Date().toLocaleString()}] --- HOÀN TẤT KIỂM TRA ---`);
 }
 
 // Chạy cronjob vào 8:00 sáng mỗi ngày
-// (Nếu muốn chạy 1 phút 1 lần hãy đổi "0 8 * * *" thành "* * * * *")
-cron.schedule(
-  "0 8 * * *", 
-  () => {
-    runAllChecks();
-  },
-  {
-    scheduled: true,
-    timezone: "Asia/Ho_Chi_Minh", 
-  }
-);
+cron.schedule("0 8 * * *", () => { runAllChecks(); }, {
+  scheduled: true,
+  timezone: "Asia/Ho_Chi_Minh", 
+});
 
-console.log("🚀 Bot đã bật! Chế độ kiểm tra: 8h00 Sáng mỗi ngày.");
-console.log("Thông báo sẽ được gửi qua Telegram nếu có proxy sắp hết hạn (< 24h).");
-
-// Chạy thử luôn lần đầu khi bật code
-runAllChecks();
+console.log(`🚀 Bot đã bật! Đang lắng nghe file config.json...`);
+runAllChecks(); // Test thử ngay lần đầu
